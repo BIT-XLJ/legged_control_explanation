@@ -31,8 +31,8 @@ bool LeggedController::init(hardware_interface::RobotHW* robot_hw, ros::NodeHand
   std::string taskFile;
   std::string referenceFile;
   controller_nh.getParam("/urdfFile", urdfFile);
-  controller_nh.getParam("/taskFile", taskFile);
-  controller_nh.getParam("/referenceFile", referenceFile);
+  controller_nh.getParam("/taskFile", taskFile);            //这三个文件在load_controller.launch中定义，在legged_controllers/config目录下
+  controller_nh.getParam("/referenceFile", referenceFile);  //
   bool verbose = false;
   loadData::loadCppDataType(taskFile, "legged_robot_interface.verbose", verbose);
 
@@ -199,8 +199,8 @@ LeggedController::~LeggedController() {
 
 void LeggedController::setupLeggedInterface(const std::string& taskFile, const std::string& urdfFile, const std::string& referenceFile,
                                             bool verbose) {
-  leggedInterface_ = std::make_shared<LeggedInterface>(taskFile, urdfFile, referenceFile);
-  leggedInterface_->setupOptimalControlProblem(taskFile, urdfFile, referenceFile, verbose);
+  leggedInterface_ = std::make_shared<LeggedInterface>(taskFile, urdfFile, referenceFile);               //LeggedInterface类型的共享智能指针
+  leggedInterface_->setupOptimalControlProblem(taskFile, urdfFile, referenceFile, verbose);              //
 }
 
 void LeggedController::setupMpc() {

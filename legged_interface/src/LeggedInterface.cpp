@@ -36,7 +36,7 @@
 
 namespace legged {
 LeggedInterface::LeggedInterface(const std::string& taskFile, const std::string& urdfFile, const std::string& referenceFile,
-                                 bool useHardFrictionConeConstraint)
+                                 bool useHardFrictionConeConstraint)   //标志位，是否使用硬摩擦锥约束
     : useHardFrictionConeConstraint_(useHardFrictionConeConstraint) {
   // check that task file exists
   boost::filesystem::path taskFilePath(taskFile);
@@ -79,30 +79,31 @@ LeggedInterface::LeggedInterface(const std::string& taskFile, const std::string&
 /******************************************************************************************************/
 void LeggedInterface::setupOptimalControlProblem(const std::string& taskFile, const std::string& urdfFile, const std::string& referenceFile,
                                                  bool verbose) {
-  setupModel(taskFile, urdfFile, referenceFile, verbose);
+  setupModel(taskFile, urdfFile, referenceFile, verbose);           //设置机器人模型
 
   // Initial state
-  initialState_.setZero(centroidalModelInfo_.stateDim);
-  loadData::loadEigenMatrix(taskFile, "initialState", initialState_);
+  initialState_.setZero(centroidalModelInfo_.stateDim);               //将质心动力学模型的初始状态设置为零状态
+  loadData::loadEigenMatrix(taskFile, "initialState", initialState_); //从taskFile中读取预设的initialState到initialState_变量中
 
   setupReferenceManager(taskFile, urdfFile, referenceFile, verbose);
 
   // Optimal control problem
-  problemPtr_ = std::make_unique<OptimalControlProblem>();
+  problemPtr_ = std::make_unique<OptimalControlProblem>();            //OptimalControlProblem类型的智能指针
 
   // Dynamics
-  std::unique_ptr<SystemDynamicsBase> dynamicsPtr;
-  dynamicsPtr = std::make_unique<LeggedRobotDynamicsAD>(*pinocchioInterfacePtr_, centroidalModelInfo_, "dynamics", modelSettings_);
-  problemPtr_->dynamicsPtr = std::move(dynamicsPtr);
+  std::unique_ptr<SystemDynamicsBase> dynamicsPtr;                    //SystemDynamicsBase类型的智能指针，SystemDynamicsBase是LeggedRobotDynamicsAD的父类
+  dynamicsPtr = std::make_unique<LeggedRobotDynamicsAD>(*pinocchioInterfacePtr_, centroidalModelInfo_, "dynamics", modelSettings_); //dynamicsPtr指针指向一个LeggedRobotDynamicsAD类
+
+  problemPtr_->dynamicsPtr = std::move(dynamicsPtr);                  //移动拷贝函数，将dynamicsPtr移动给problemPtr_的dynamicsPtr成员
 
   // Cost terms
-  problemPtr_->costPtr->add("baseTrackingCost", getBaseTrackingCost(taskFile, centroidalModelInfo_, verbose));
+  problemPtr_->costPtr->add("baseTrackingCost", getBaseTrackingCost(taskFile, centroidalModelInfo_, verbose));  //设置代价函数
 
   // Constraint terms
   // friction cone settings
-  scalar_t frictionCoefficient = 0.7;
-  RelaxedBarrierPenalty::Config barrierPenaltyConfig;
-  std::tie(frictionCoefficient, barrierPenaltyConfig) = loadFrictionConeSettings(taskFile, verbose);
+  scalar_t frictionCoefficient = 0.7;                                                                           //摩擦锥系数，猜测是sqrt(2)/2?
+  RelaxedBarrierPenalty::Config barrierPenaltyConfig;                                                           //罚函数配置
+  std::tie(frictionCoefficient, barrierPenaltyConfig) = loadFrictionConeSettings(taskFile, verbose);            //
 
   for (size_t i = 0; i < centroidalModelInfo_.numThreeDofContacts; i++) {
     const std::string& footName = modelSettings_.contactNames3DoF[i];

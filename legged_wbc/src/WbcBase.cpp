@@ -21,18 +21,18 @@ WbcBase::WbcBase(const PinocchioInterface& pinocchioInterface, CentroidalModelIn
       mapping_(info_),
       inputLast_(vector_t::Zero(info_.inputDim)),
       eeKinematics_(eeKinematics.clone()) {
-  numDecisionVars_ = info_.generalizedCoordinatesNum + 3 * info_.numThreeDofContacts + info_.actuatedDofNum;
+  numDecisionVars_ = info_.generalizedCoordinatesNum + 3 * info_.numThreeDofContacts + info_.actuatedDofNum;  //决策变量的个数 = 广义坐标数量 + 3 * 点接触数量（每个接触点有三个力）+ 主动驱动自由度数量
   qMeasured_ = vector_t(info_.generalizedCoordinatesNum);
   vMeasured_ = vector_t(info_.generalizedCoordinatesNum);
 }
 
 vector_t WbcBase::update(const vector_t& stateDesired, const vector_t& inputDesired, const vector_t& rbdStateMeasured, size_t mode,
                          scalar_t /*period*/) {
-  contactFlag_ = modeNumber2StanceLeg(mode);
+  contactFlag_ = modeNumber2StanceLeg(mode);     //不同的运动模式对应的四条腿的触地状态
   numContacts_ = 0;
   for (bool flag : contactFlag_) {
     if (flag) {
-      numContacts_++;
+      numContacts_++;                            //触地足数量
     }
   }
 
@@ -45,7 +45,7 @@ vector_t WbcBase::update(const vector_t& stateDesired, const vector_t& inputDesi
 void WbcBase::updateMeasured(const vector_t& rbdStateMeasured) {
   qMeasured_.head<3>() = rbdStateMeasured.segment<3>(3);
   qMeasured_.segment<3>(3) = rbdStateMeasured.head<3>();
-  qMeasured_.tail(info_.actuatedDofNum) = rbdStateMeasured.segment(6, info_.actuatedDofNum);
+  qMeasured_.tail(info_.actuatedDofNum) = rbdStateMeasured.segment(6, info_.actuatedDofNum); 
   vMeasured_.head<3>() = rbdStateMeasured.segment<3>(info_.generalizedCoordinatesNum + 3);
   vMeasured_.segment<3>(3) = getEulerAnglesZyxDerivativesFromGlobalAngularVelocity<scalar_t>(
       qMeasured_.segment<3>(3), rbdStateMeasured.segment<3>(info_.generalizedCoordinatesNum));
@@ -54,10 +54,10 @@ void WbcBase::updateMeasured(const vector_t& rbdStateMeasured) {
   const auto& model = pinocchioInterfaceMeasured_.getModel();
   auto& data = pinocchioInterfaceMeasured_.getData();
 
-  // For floating base EoM task
-  pinocchio::forwardKinematics(model, data, qMeasured_, vMeasured_);
-  pinocchio::computeJointJacobians(model, data);
-  pinocchio::updateFramePlacements(model, data);
+  // For floating base EoM task   浮动基座动力学方程
+  pinocchio::forwardKinematics(model, data, qMeasured_, vMeasured_);  //更新正向运动学
+  pinocchio::computeJointJacobians(model, data);                      //计算关节雅可比
+  pinocchio::updateFramePlacements(model, data);                      //更新坐标系
   pinocchio::crba(model, data, qMeasured_);
   data.M.triangularView<Eigen::StrictlyLower>() = data.M.transpose().triangularView<Eigen::StrictlyLower>();
   pinocchio::nonLinearEffects(model, data, qMeasured_, vMeasured_);
@@ -85,21 +85,21 @@ void WbcBase::updateDesired(const vector_t& stateDesired, const vector_t& inputD
   auto& data = pinocchioInterfaceDesired_.getData();
 
   mapping_.setPinocchioInterface(pinocchioInterfaceDesired_);
-  const auto qDesired = mapping_.getPinocchioJointPosition(stateDesired);
-  pinocchio::forwardKinematics(model, data, qDesired);
-  pinocchio::computeJointJacobians(model, data, qDesired);
-  pinocchio::updateFramePlacements(model, data);
+  const auto qDesired = mapping_.getPinocchioJointPosition(stateDesired); //根据机器人的期望状态计算得到对应的期望广义坐标向量
+  pinocchio::forwardKinematics(model, data, qDesired);     //前向运动学，更新广义坐标
+  pinocchio::computeJointJacobians(model, data, qDesired); //计算关节雅可比
+  pinocchio::updateFramePlacements(model, data);           //更新坐标系
   updateCentroidalDynamics(pinocchioInterfaceDesired_, info_, qDesired);
   const vector_t vDesired = mapping_.getPinocchioJointVelocity(stateDesired, inputDesired);
   pinocchio::forwardKinematics(model, data, qDesired, vDesired);
 }
 
-Task WbcBase::formulateFloatingBaseEomTask() {
+Task WbcBase::formulateFloatingBaseEomTask() {                             //这个任务是为了满足系统的拉格朗日动力学方程，但是不太理解为啥需要这个任务
   auto& data = pinocchioInterfaceMeasured_.getData();
 
-  matrix_t s(info_.actuatedDofNum, info_.generalizedCoordinatesNum);
-  s.block(0, 0, info_.actuatedDofNum, 6).setZero();
-  s.block(0, 6, info_.actuatedDofNum, info_.actuatedDofNum).setIdentity();
+  matrix_t s(info_.actuatedDofNum, info_.generalizedCoordinatesNum);       //s行为主动自由度个数，列为广义坐标数量
+  s.block(0, 0, info_.actuatedDofNum, 6).setZero();                        //前6列设为0
+  s.block(0, 6, info_.actuatedDofNum, info_.actuatedDofNum).setIdentity(); //后面的方阵设置为单位矩阵
 
   matrix_t a = (matrix_t(info_.generalizedCoordinatesNum, numDecisionVars_) << data.M, -j_.transpose(), -s.transpose()).finished();
   vector_t b = -data.nle;
@@ -108,7 +108,7 @@ Task WbcBase::formulateFloatingBaseEomTask() {
 }
 
 Task WbcBase::formulateTorqueLimitsTask() {
-  matrix_t d(2 * info_.actuatedDofNum, numDecisionVars_);
+  matrix_t d(2 * info_.actuatedDofNum, numDecisionVars_);    //决策变量的维数是广义变量的维数+地面的反作用力（触地足的数量x3）+主动关节的数量
   d.setZero();
   matrix_t i = matrix_t::Identity(info_.actuatedDofNum, info_.actuatedDofNum);
   d.block(0, info_.generalizedCoordinatesNum + 3 * info_.numThreeDofContacts, info_.actuatedDofNum, info_.actuatedDofNum) = i;
@@ -119,12 +119,12 @@ Task WbcBase::formulateTorqueLimitsTask() {
     f.segment<3>(3 * l) = torqueLimits_;
   }
 
-  return {matrix_t(), vector_t(), d, f};
+  return {matrix_t(), vector_t(), d, f};               //力矩限幅是不等式约束，这里其实就是限制了电机的扭矩 -F_limit < tau < F_limit
 }
 
 Task WbcBase::formulateNoContactMotionTask() {
-  matrix_t a(3 * numContacts_, numDecisionVars_);
-  vector_t b(a.rows());
+  matrix_t a(3 * numContacts_, numDecisionVars_);    //这里考虑的是接触点加速度为零，对应J*q_dot_dot + J_dot*q_dot = 0,等式约束，即为论文中的contact motion constraints
+  vector_t b(a.rows()); 
   a.setZero();
   b.setZero();
   size_t j = 0;
@@ -140,7 +140,7 @@ Task WbcBase::formulateNoContactMotionTask() {
 }
 
 Task WbcBase::formulateFrictionConeTask() {
-  matrix_t a(3 * (info_.numThreeDofContacts - numContacts_), numDecisionVars_);
+  matrix_t a(3 * (info_.numThreeDofContacts - numContacts_), numDecisionVars_);    //摩擦锥约束
   a.setZero();
   size_t j = 0;
   for (size_t i = 0; i < info_.numThreeDofContacts; ++i) {
@@ -149,7 +149,7 @@ Task WbcBase::formulateFrictionConeTask() {
     }
   }
   vector_t b(a.rows());
-  b.setZero();
+  b.setZero();                                                                     //a,b的等式约束是为了让非触地足的足端力为0
 
   matrix_t frictionPyramic(5, 3);  // clang-format off
   frictionPyramic << 0, 0, -1,
@@ -158,12 +158,12 @@ Task WbcBase::formulateFrictionConeTask() {
                      0, 1, -frictionCoeff_,
                      0,-1, -frictionCoeff_;  // clang-format on
 
-  matrix_t d(5 * numContacts_ + 3 * (info_.numThreeDofContacts - numContacts_), numDecisionVars_);
+  matrix_t d(5 * numContacts_ + 3 * (info_.numThreeDofContacts - numContacts_), numDecisionVars_);   //d的维数：触地足数量*5+摆动足数量*3有点问题，难道不是触地足数量*5就足够了吗？
   d.setZero();
   j = 0;
   for (size_t i = 0; i < info_.numThreeDofContacts; ++i) {
     if (contactFlag_[i]) {
-      d.block(5 * j++, info_.generalizedCoordinatesNum + 3 * i, 5, 3) = frictionPyramic;
+      d.block(5 * j++, info_.generalizedCoordinatesNum + 3 * i, 5, 3) = frictionPyramic;             //触地足的地方赋值为摩擦锥的矩阵
     }
   }
   vector_t f = Eigen::VectorXd::Zero(d.rows());
@@ -171,12 +171,12 @@ Task WbcBase::formulateFrictionConeTask() {
   return {a, b, d, f};
 }
 
-Task WbcBase::formulateBaseAccelTask(const vector_t& stateDesired, const vector_t& inputDesired, scalar_t period) {
+Task WbcBase::formulateBaseAccelTask(const vector_t& stateDesired, const vector_t& inputDesired, scalar_t period) {    //这里没看懂
   matrix_t a(6, numDecisionVars_);
   a.setZero();
-  a.block(0, 0, 6, 6) = matrix_t::Identity(6, 6);
+  a.block(0, 0, 6, 6) = matrix_t::Identity(6, 6);      //前6行6列赋值为单位矩阵
 
-  vector_t jointAccel = centroidal_model::getJointVelocities(inputDesired - inputLast_, info_) / period;
+  vector_t jointAccel = centroidal_model::getJointVelocities(inputDesired - inputLast_, info_) / period; //获取关节的加速度（差分）
   inputLast_ = inputDesired;
   mapping_.setPinocchioInterface(pinocchioInterfaceDesired_);
 
@@ -207,17 +207,17 @@ Task WbcBase::formulateSwingLegTask() {
   std::vector<vector3_t> posDesired = eeKinematics_->getPosition(vector_t());
   std::vector<vector3_t> velDesired = eeKinematics_->getVelocity(vector_t(), vector_t());
 
-  matrix_t a(3 * (info_.numThreeDofContacts - numContacts_), numDecisionVars_);
+  matrix_t a(3 * (info_.numThreeDofContacts - numContacts_), numDecisionVars_);      //维数：行：摆动足数量*3，列：决策变量维数
   vector_t b(a.rows());
   a.setZero();
   b.setZero();
   size_t j = 0;
   for (size_t i = 0; i < info_.numThreeDofContacts; ++i) {
     if (!contactFlag_[i]) {
-      vector3_t accel = swingKp_ * (posDesired[i] - posMeasured[i]) + swingKd_ * (velDesired[i] - velMeasured[i]);
-      a.block(3 * j, 0, 3, info_.generalizedCoordinatesNum) = j_.block(3 * i, 0, 3, info_.generalizedCoordinatesNum);
-      b.segment(3 * j, 3) = accel - dj_.block(3 * i, 0, 3, info_.generalizedCoordinatesNum) * vMeasured_;
-      j++;
+      vector3_t accel = swingKp_ * (posDesired[i] - posMeasured[i]) + swingKd_ * (velDesired[i] - velMeasured[i]);       //PD控制，acc = kp * (期望位置 - 反馈位置) + kd * (期望速度 - 反馈速度)
+      a.block(3 * j, 0, 3, info_.generalizedCoordinatesNum) = j_.block(3 * i, 0, 3, info_.generalizedCoordinatesNum);    //
+      b.segment(3 * j, 3) = accel - dj_.block(3 * i, 0, 3, info_.generalizedCoordinatesNum) * vMeasured_;                //这个任务的目的是，让摆动足满足对应的 J*q_dot_dot + J_dot*q_dot = accel(这里的accel就是PD控制得到的期望加速度，是操作空间内的量)
+      j++;                                                                                                               //
     }
   }
 
@@ -230,7 +230,7 @@ Task WbcBase::formulateContactForceTask(const vector_t& inputDesired) const {
   a.setZero();
 
   for (size_t i = 0; i < info_.numThreeDofContacts; ++i) {
-    a.block(3 * i, info_.generalizedCoordinatesNum + 3 * i, 3, 3) = matrix_t::Identity(3, 3);
+    a.block(3 * i, info_.generalizedCoordinatesNum + 3 * i, 3, 3) = matrix_t::Identity(3, 3);                           //这个任务的目的是让足端的输出力等于inputDesired，推测inputDesired是MPC计算得到的优化量
   }
   b = inputDesired.head(a.rows());
 

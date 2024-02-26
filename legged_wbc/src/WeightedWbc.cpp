@@ -22,14 +22,14 @@ vector_t WeightedWbc::update(const vector_t& stateDesired, const vector_t& input
        constraints.d_;
 
   lbA << constraints.b_,
-         -qpOASES::INFTY * vector_t::Ones(constraints.f_.size());
+         -qpOASES::INFTY * vector_t::Ones(constraints.f_.size());        //此部分为约束，是对A阵的约束
   ubA << constraints.b_,
          constraints.f_;  // clang-format on
 
   // Cost
-  Task weighedTask = formulateWeightedTasks(stateDesired, inputDesired, period);
+  Task weighedTask = formulateWeightedTasks(stateDesired, inputDesired, period);        //这里将一部分的任务作为二次规划问题的约束，另一部分的任务作为二次规划问题的代价函数
   Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> H = weighedTask.a_.transpose() * weighedTask.a_;
-  vector_t g = -weighedTask.a_.transpose() * weighedTask.b_;
+  vector_t g = -weighedTask.a_.transpose() * weighedTask.b_;                            //Cost = 1/2 x^T * a^T * a * x - x^T * a^T * b , 对应 H = a^T * a , g = - a^T * b
 
   // Solve
   auto qpProblem = qpOASES::QProblem(getNumDecisionVars(), numConstraints);
